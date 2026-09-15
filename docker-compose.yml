@@ -1,0 +1,55 @@
+# Docker Compose — AI Habitat
+#
+# For future use when Docker is available.
+# Local development works without Docker using SQLite.
+#
+# Usage:
+#   docker compose up --build
+#
+# Services:
+#   - db:  PostgreSQL 16
+#   - api: FastAPI backend
+#   - web: React frontend
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: habitat
+      POSTGRES_PASSWORD: habitat
+      POSTGRES_DB: ai_habitat
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U habitat"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://habitat:habitat@db:5432/ai_habitat
+      ENVIRONMENT: development
+      CORS_ORIGINS: http://localhost:5173
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
