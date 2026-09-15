@@ -136,8 +136,8 @@ class TestPhase3Matrix:
         )
         assert resp_tick.status_code == 200
         data = resp_tick.json()["data"]
-        assert data["intent_type"] == "ACKNOWLEDGE_OBSERVATION"
-        assert data["payload"]["processed_event"] == "say_hello"
+        assert data["intent_type"] == "REPLY"
+        assert data["payload"]["message"] == "Processed: hello"
 
     async def test_06_binding_swappability(self, client: AsyncClient, user_a):
         """6. Change the is_default flag. Execute tick. Verify the Intent reflects the new binding's provider."""

@@ -22,14 +22,28 @@ class RuntimeSession:
         """Processes an observation and context to yield an intent."""
         
         self.scratchpad.append(f"Observed: {observation.event}")
-        
-        # Mocking the Cognitive Engine logic
         provider = self.binding.provider if self.binding else "fallback_mock"
         
-        intent = Intent(
-            intent_type="ACKNOWLEDGE_OBSERVATION",
-            payload={"processed_event": observation.event},
+        # MOCK COGNITIVE ENGINE LOGIC FOR PHASE 5
+        # If the human asks a math question, we use the calculator tool.
+        if observation.event == "user_message" and "calculate" in str(observation.content).lower():
+            return Intent(
+                intent_type="TOOL_CALL",
+                payload={"tool_name": "calculator", "tool_args": {"expression": "2+2"}},
+                provider_used=provider
+            )
+            
+        # If the environment returns a tool result, we reply to the user.
+        if observation.event == "tool_result":
+            return Intent(
+                intent_type="REPLY",
+                payload={"message": f"The result is {observation.content}"},
+                provider_used=provider
+            )
+        
+        # Default fallback reply
+        return Intent(
+            intent_type="REPLY",
+            payload={"message": f"Processed: {observation.content}"},
             provider_used=provider
         )
-        
-        return intent

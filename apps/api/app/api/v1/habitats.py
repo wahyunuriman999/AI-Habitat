@@ -201,3 +201,83 @@ async def runtime_tick(
     
     # We return the Intent without doing any commits or executions
     return success_response(data=intent.model_dump(mode="json"))
+
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.core.environment import HabitatEnvironment
+from pydantic import BaseModel
+
+class ChatRequest(BaseModel):
+    ai_identity_id: uuid.UUID
+    conversation_id: uuid.UUID | None = None
+    message: str
+
+@router.post("/{id}/chat", response_model=None)
+async def habitat_chat(
+    id: uuid.UUID,
+    data: ChatRequest,
+    current_user: User = Depends(get_current_identity),
+    session: AsyncSession = Depends(get_session)
+):
+    " " "The Final Phase Agent Loop endpoint. Drives the Environment Orchestrator." " "
+    # 1. Authorize human caller
+    membership_res = await session.execute(
+        select(HabitatMembership).where(
+            HabitatMembership.habitat_id == id,
+            HabitatMembership.user_id == current_user.id
+        )
+    )
+    if not membership_res.scalar_one_or_none():
+        raise AppError(ErrorCode.NOT_FOUND, "Habitat not found.")
+        
+    # 2. I-09 Validation
+    participation_res = await session.execute(
+        select(HabitatParticipation).where(
+            HabitatParticipation.habitat_id == id,
+            HabitatParticipation.ai_identity_id == data.ai_identity_id,
+            HabitatParticipation.state == "ACTIVE"
+        )
+    )
+    if not participation_res.scalar_one_or_none():
+        raise AppError(ErrorCode.PERMISSION_DENIED, "AI Identity does not have an active participation.")
+        
+    # 3. Setup Conversation
+    if data.conversation_id:
+        conversation = await session.get(Conversation, data.conversation_id)
+        if not conversation or conversation.habitat_id != id:
+            raise AppError(ErrorCode.NOT_FOUND, "Conversation not found in this habitat.")
+    else:
+        conversation = Conversation(habitat_id=id, title="New Chat")
+        session.add(conversation)
+        await session.flush()
+        
+    # 4. Save User Message
+    user_msg = Message(
+        conversation_id=conversation.id,
+        role="user",
+        content=data.message,
+        sender_user_id=current_user.id
+    )
+    session.add(user_msg)
+    await session.flush()
+    
+    # 5. Prepare Runtime
+    binding_res = await session.execute(
+        select(CognitiveBinding).where(
+            CognitiveBinding.ai_identity_id == data.ai_identity_id,
+            CognitiveBinding.is_default == True
+        )
+    )
+    binding = binding_res.scalar_one_or_none()
+    runtime = RuntimeSession(data.ai_identity_id, id, binding)
+    
+    # 6. Execute Environment Loop
+    env = HabitatEnvironment(session)
+    initial_obs = Observation(event="user_message", content=data.message)
+    new_messages = await env.run_loop(runtime, conversation.id, initial_obs)
+    
+    # Pydantic schemas would normally be used here, returning raw dict for now
+    return success_response(data={
+        "conversation_id": str(conversation.id),
+        "responses": [{"role": m.role, "content": m.content} for m in new_messages]
+    })
